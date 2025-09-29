@@ -17,6 +17,8 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
+      with:
+        ref: main
     
     - name: 设置 FFmpeg
       uses: FedericoCarboni/setup-ffmpeg@v3
