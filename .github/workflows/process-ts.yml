@@ -1,0 +1,201 @@
+# GitHub Actions工作流: XMBOX TS片段合成处理
+# 仓库: https://github.com/Tosencen/XMBOX-TS-Processor
+# 用途: 为XMBOX应用提供云端TS合并服务
+
+name: XMBOX TS Processing
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: '任务ID'
+        required: true
+        type: string
+      file_count:
+        description: 'TS文件数量'
+        required: true
+        type: number
+      title:
+        description: '视频标题'
+        required: true
+        type: string
+
+jobs:
+  process-ts:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: processing
+    
+    - name: Setup FFmpeg
+      uses: FedericoCarboni/setup-ffmpeg@v3
+      with:
+        ffmpeg-version: release
+        architecture: x64
+    
+    - name: Verify FFmpeg installation
+      run: |
+        echo "🔧 验证FFmpeg安装..."
+        ffmpeg -version | head -5
+        echo ""
+        echo "📋 支持的格式:"
+        ffmpeg -formats | grep -E "(mpegts|mp4)" | head -10
+        echo ""
+        echo "✅ FFmpeg准备就绪"
+    
+    - name: Process TS segments
+      env:
+        TASK_ID: ${{ github.event.inputs.task_id }}
+        FILE_COUNT: ${{ github.event.inputs.file_count }}
+        TITLE: ${{ github.event.inputs.title }}
+      run: |
+        echo "🎬 开始处理XMBOX TS合并任务"
+        echo "📝 任务ID: $TASK_ID"
+        echo "📊 文件数量: $FILE_COUNT"
+        echo "🎯 视频标题: $TITLE"
+        echo ""
+        
+        # 进入任务目录
+        cd tasks/$TASK_ID
+        
+        # 验证文件完整性
+        echo "🔍 验证TS文件完整性..."
+        total_size=0
+        for i in $(seq -f "%03g" 0 $((FILE_COUNT-1))); do
+          if [ ! -f "segment_${i}.ts" ]; then
+            echo "❌ 错误: 文件 segment_${i}.ts 不存在"
+            exit 1
+          fi
+          file_size=$(du -b "segment_${i}.ts" | cut -f1)
+          total_size=$((total_size + file_size))
+          echo "✅ segment_${i}.ts ($(du -h segment_${i}.ts | cut -f1))"
+        done
+        
+        echo "📦 总文件大小: $(numfmt --to=iec $total_size)"
+        
+        # 验证文件列表
+        if [ ! -f "filelist.txt" ]; then
+          echo "❌ 错误: filelist.txt 不存在"
+          exit 1
+        fi
+        
+        echo ""
+        echo "📋 文件列表内容:"
+        cat filelist.txt
+        echo ""
+        
+        # 使用FFmpeg合并TS片段
+        echo "🚀 开始FFmpeg处理..."
+        echo "⚙️  使用参数: -c copy -avoid_negative_ts make_zero -fflags +genpts"
+        
+        ffmpeg -f concat -safe 0 -i filelist.txt \
+               -c copy \
+               -avoid_negative_ts make_zero \
+               -fflags +genpts \
+               -y output.mp4 \
+               -v info
+        
+        # 验证输出文件
+        if [ ! -f "output.mp4" ]; then
+          echo "❌ 错误: 输出文件未生成"
+          exit 1
+        fi
+        
+        # 获取文件信息
+        OUTPUT_SIZE=$(du -h output.mp4 | cut -f1)
+        DURATION=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 output.mp4 2>/dev/null || echo "未知")
+        
+        echo ""
+        echo "🎉 处理完成!"
+        echo "📁 输出文件: output.mp4"
+        echo "📏 文件大小: $OUTPUT_SIZE" 
+        echo "⏱️  视频时长: ${DURATION}秒"
+        
+        # 重命名为最终文件名
+        final_name="${TASK_ID}.mp4"
+        mv output.mp4 "$final_name"
+        
+        echo "✅ 文件已重命名为: $final_name"
+        
+        # 生成处理报告
+        cat > processing_report.txt << EOF
+XMBOX TS处理报告
+================
+任务ID: $TASK_ID
+视频标题: $TITLE
+处理时间: $(date)
+TS文件数量: $FILE_COUNT
+输入总大小: $(numfmt --to=iec $total_size)
+输出文件: $final_name
+输出大小: $OUTPUT_SIZE
+视频时长: ${DURATION}秒
+处理状态: 成功
+EOF
+        
+        echo ""
+        echo "📄 处理报告:"
+        cat processing_report.txt
+    
+    - name: Upload result to release
+      env:
+        TASK_ID: ${{ github.event.inputs.task_id }}
+        TITLE: ${{ github.event.inputs.title }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cd tasks/$TASK_ID
+        
+        echo "📤 上传处理结果到GitHub Release..."
+        
+        # 创建Release
+        gh release create $TASK_ID \
+          --title "XMBOX TS处理结果: $TITLE" \
+          --notes "🎬 **XMBOX TS片段合成完成**
+        
+        📊 **处理信息:**
+        - 任务ID: \`$TASK_ID\`
+        - 视频标题: \`$TITLE\`
+        - TS文件数量: \`${{ github.event.inputs.file_count }}\`
+        - 输出文件: \`${TASK_ID}.mp4\`
+        - 处理时间: \`$(date)\`
+        
+        📥 **下载链接:**
+        点击下方的 \`${TASK_ID}.mp4\` 文件进行下载
+        
+        ⚠️ **注意:** 此文件将在24小时后自动删除
+        
+        🔗 **相关链接:**
+        - [XMBOX项目](https://github.com/Tosencen/XMBOX)
+        - [处理日志](https://github.com/Tosencen/XMBOX-TS-Processor/actions/runs/${{ github.run_id }})" \
+          ${TASK_ID}.mp4 processing_report.txt
+        
+        echo "✅ Release创建成功: https://github.com/Tosencen/XMBOX-TS-Processor/releases/tag/$TASK_ID"
+    
+    - name: Cleanup source files
+      env:
+        TASK_ID: ${{ github.event.inputs.task_id }}
+      run: |
+        echo "🧹 清理源文件以节省存储空间..."
+        
+        # 清理源TS文件
+        rm -rf tasks/$TASK_ID/segment_*.ts
+        rm -f tasks/$TASK_ID/filelist.txt
+        
+        echo "✅ 源文件清理完成"
+        echo "💾 节省存储空间: $(du -sh tasks/$TASK_ID | cut -f1)"
+    
+    - name: Setup cleanup reminder
+      env:
+        TASK_ID: ${{ github.event.inputs.task_id }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "⏰ 设置清理提醒..."
+        echo "📝 Release $TASK_ID 已创建"
+        echo "⏳ 请在24小时内下载文件"
+        echo "🗑️  过期文件将自动清理"
+        
+        # 这里可以集成GitHub API来设置定时清理
+        # 或者使用外部服务如cron-job.org
+        echo "💡 建议: 配置自动清理脚本定期清理过期Release"

@@ -1,0 +1,26 @@
+# 临时任务文件
+tasks/*/segment_*.ts
+tasks/*/filelist.txt
+tasks/*/processing_report.txt
+tasks/*/*.mp4
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境文件
+.env
+.env.local
