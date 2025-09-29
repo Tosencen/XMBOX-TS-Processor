@@ -57,28 +57,28 @@ jobs:
         fi
         echo "✅ 发现 $total_files 个TS文件"
         
-        # 生成文件列表
-        echo "📝 生成文件列表..."
-        rm -f files.txt
-        for f in $(ls -1v *.ts); do
-          realpath "$f" >> files.txt
-        done
-        
-        # 先验证每个TS文件
-        echo "🔍 验证每个TS文件..."
-        while IFS= read -r file; do
-          ffprobe -v error "$file"
-          if [ $? -ne 0 ]; then
-            echo "❌ 错误：文件 $file 验证失败"
-            exit 1
-          fi
-        done < files.txt
-        
-        # 使用FFmpeg合并
-        echo "🎬 开始合并..."
+        # 准备输出目录
         OUTPUT_FILE="../../$OUTPUT_DIR/${TASK_ID}.mp4"
         mkdir -p "$(dirname "$OUTPUT_FILE")"
-        ffmpeg -f concat -safe 0 -i files.txt -c copy "$OUTPUT_FILE"
+        
+        # 直接使用FFmpeg合并
+        echo "🎬 开始合并..."
+        input_files=""
+        for f in $(ls -1v *.ts); do
+          # 先验证文件
+          ffprobe -v error "$f"
+          if [ $? -ne 0 ]; then
+            echo "❌ 错误：文件 $f 验证失败"
+            exit 1
+          fi
+          input_files="$input_files|$f"
+        done
+        
+        # 移除开头的 | 字符
+        input_files=${input_files#|}
+        
+        # 使用concat协议合并
+        ffmpeg -i "concat:$input_files" -c copy "$OUTPUT_FILE"
         
         # 验证输出
         if [ ! -f "$OUTPUT_FILE" ]; then
