@@ -1,0 +1,89 @@
+name: XMBOX TS处理器
+
+on:
+  repository_dispatch:
+    types: [process_ts]
+
+env:
+  TASK_DIR: tasks
+  OUTPUT_DIR: output
+
+jobs:
+  process-ts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置 FFmpeg
+      uses: FedericoCarboni/setup-ffmpeg@v3
+      with:
+        ffmpeg-version: release
+        architecture: x64
+    
+    - name: 验证 FFmpeg 安装
+      run: |
+        echo "🔧 验证FFmpeg安装..."
+        ffmpeg -version | head -5
+        echo ""
+        echo "📋 支持的格式:"
+        ffmpeg -formats | grep -E "(mpegts|mp4)" | head -10
+        echo ""
+        echo "✅ FFmpeg准备就绪"
+    
+    - name: 准备工作目录
+      run: |
+        TASK_ID="${{ github.event.client_payload.task_id }}"
+        mkdir -p "$TASK_DIR/$TASK_ID"
+        mkdir -p "$OUTPUT_DIR"
+        echo "TASK_ID=$TASK_ID" >> $GITHUB_ENV
+    
+    - name: 处理TS文件
+      run: |
+        cd "$TASK_DIR/$TASK_ID"
+        
+        # 验证TS文件
+        echo "🔍 验证TS文件..."
+        total_files=$(ls -1 *.ts 2>/dev/null | wc -l)
+        if [ "$total_files" -eq 0 ]; then
+          echo "❌ 错误：没有找到TS文件"
+          exit 1
+        fi
+        echo "✅ 发现 $total_files 个TS文件"
+        
+        # 生成文件列表
+        echo "📝 生成文件列表..."
+        for f in *.ts; do
+          echo "file '$f'" >> files.txt
+        done
+        
+        # 使用FFmpeg合并
+        echo "🎬 开始合并..."
+        OUTPUT_FILE="../../$OUTPUT_DIR/${TASK_ID}.mp4"
+        ffmpeg -f concat -safe 0 -i files.txt -c copy -movflags +faststart "$OUTPUT_FILE"
+        
+        # 验证输出
+        if [ ! -f "$OUTPUT_FILE" ]; then
+          echo "❌ 错误：输出文件不存在"
+          exit 1
+        fi
+        
+        echo "✅ 合并完成：$(basename "$OUTPUT_FILE")"
+    
+    - name: 创建发布
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: task-${{ env.TASK_ID }}
+        name: "TS处理结果 - ${{ github.event.client_payload.title }}"
+        body: |
+          🎥 处理任务ID: ${{ env.TASK_ID }}
+          📝 视频标题: ${{ github.event.client_payload.title }}
+          📊 处理文件数: ${{ github.event.client_payload.file_count }}
+          ⏱ 处理时间: ${{ github.event.created_at }}
+        files: |
+          ${{ env.OUTPUT_DIR }}/${{ env.TASK_ID }}.mp4
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
